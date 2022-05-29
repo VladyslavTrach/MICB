@@ -1,0 +1,718 @@
+import telebot
+import config
+from telebot import types
+import psycopg2
+from config import host, user, password, db_name
+
+bot = telebot.TeleBot(config.token)
+
+try:
+    con = psycopg2.connect(
+        host=host,
+        user=user,
+        password=password,
+        database=db_name
+    )
+
+    c = con.cursor()
+
+except Exception as ex:
+    print("[INFO] Error while working with PostgreSQL", ex)
+
+
+# c.execute("DROP TABLE IF EXISTS event")
+# c.execute("DROP TABLE IF EXISTS timetable")
+# c.execute("DROP TABLE IF EXISTS users")
+
+def db_user_table_create():
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL NOT NULL ,
+                first_name TEXT NOT NULL,
+                last_name TEXT  NOT NULL,
+                username TEXT NOT NULL,
+                position_name TEXT NOT NULL
+                )""")
+    con.commit()
+
+
+def db_timetable_table_create():
+    c.execute("""CREATE TABLE IF NOT EXISTS timetable (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                date DATE NOT NULL,
+                start_hour TIME,
+                end_hour TIME,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+                )""")
+    con.commit()
+
+
+def db_event_table_create():
+    c.execute("""CREATE TABLE IF NOT EXISTS event (
+                id SERIAL PRIMARY KEY,
+                timetable_id INTEGER NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME  NOT NULL,
+                description TEXT NOT NULL,
+                link TEXT NOT NULL,
+                FOREIGN KEY (timetable_id) REFERENCES timetable(id)
+                )""")
+    con.commit()
+
+
+def db_salary_table_create():
+    c.execute("""CREATE TABLE IF NOT EXISTS salary (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                salary_amount INTEGER,
+                completed_tasks INTEGER,
+                percentage FLOAT,
+                bonuces INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+                )""")
+    con.commit()
+
+def db_tasks_table_create():
+    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    task_name TEXT,
+                    tasks_description TEXT,
+                    task_status BOOLEAN DEFAULT FALSE ,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                    )""")
+    con.commit()
+
+def db_reviews_table_create():
+    c.execute("""CREATE TABLE IF NOT EXISTS reviews (
+                    id SERIAL PRIMARY KEY,
+                    review_text TEXT
+                     )""")
+    con.commit()
+
+db_tasks_table_create()
+db_salary_table_create()
+db_user_table_create()
+db_timetable_table_create()
+db_event_table_create()
+db_reviews_table_create()
+
+
+def save_info(id: int, first_name: str, last_name: str, username: str, position_name: str,  post: str):
+    c.execute('INSERT INTO users (user_id, first_name, last_name, username, position_name, post) VALUES (%s, %s, %s, %s, %s, %s)',
+              (id, first_name, last_name, username, position_name, post,))
+    con.commit()
+
+
+def save_timetable(user_id: int, date: str, start_hour: str, end_hour: str):
+    c.execute('INSERT INTO timetable (user_id, date, start_hour, end_hour) VALUES (%s, %s, %s, %s)',
+              (user_id, date, start_hour, end_hour,))
+    con.commit()
+
+
+def save_appointment(id_timetable: int, start_time: str, end_time: str, description: str, link: str):
+    c.execute('INSERT INTO event (timetable_id, start_time, end_time, description, link) VALUES (%s, %s, %s, %s, %s)',
+              (id_timetable, start_time, end_time, description, link))
+    con.commit()
+
+
+@bot.message_handler(commands=["start"])
+def welcome(message):
+    check_if_user_exist(message.from_user.id)
+    if c.fetchone() == None:
+        bot.send_message(message.chat.id,
+                         "Oops!You don't have access to MICB bot.\nIt is available only for our company workers")
+    else:
+        rmk3 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+        rmk3.add(types.KeyboardButton("Admin"), types.KeyboardButton("User"))
+        bot.send_message(message.chat.id,
+                         "Welcome, {0.first_name}!\nI am - <b>{1.first_name}</b> bot.".format(message.from_user,
+                                                                                              bot.get_me()),
+                         parse_mode='html', reply_markup=rmk3)
+        bot.register_next_step_handler(message, user_choice1)
+
+
+@bot.message_handler(commands=["text"])
+def user_choice1(message):
+    if message.text == "Admin":
+        admin(message)
+    if message.text == "User":
+        user(message)
+
+
+#     else:
+#         error_input(message)
+#
+#
+# def error_input(message):
+#     bot.send_message(message.chat.id, "There is no such answer. \nPlease choose command from existing and press the button")
+#     bot.register_next_step_handler(message, user_choice1)
+
+def user(message):
+    rmk2 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk2.add(types.KeyboardButton("My info👨‍💻"), types.KeyboardButton("My schedule📅"),
+             types.KeyboardButton("View my appointment📅⏳🕓"),  types.KeyboardButton("View my tasks📋"),
+             types.KeyboardButton("About us/Feedbackℹ💬"),
+             types.KeyboardButton("Back🔙"))
+    bot.send_message(message.chat.id, 'Choose what command you want to do:', reply_markup=rmk2)
+    bot.register_next_step_handler(message, user_choice3)
+
+
+def user_choice3(message):
+    if message.text == "My info👨‍💻":
+        user_info(message)
+    if message.text == "My schedule📅":
+        user_schedule(message)
+    if message.text == "View my appointment📅⏳🕓":
+        view_appointment(message)
+    if message.text == "View my tasks📋":
+        view_tasks(message)
+    if message.text == "About us/Feedbackℹ💬":
+        view_about_us(message)
+    if message.text == "Back🔙":
+        rmk4 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+        rmk4.add(types.KeyboardButton("Admin"), types.KeyboardButton("User"))
+        bot.send_message(message.chat.id, 'Back🔙', reply_markup=rmk4)
+        bot.register_next_step_handler(message, user_choice1)
+    # else:
+    #     error_input(message)
+
+
+def view_about_us(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Write review:"), types.KeyboardButton("Back🔙"))
+    bot.send_message(message.chat.id, 'Hello! We`re team of MICB! \nOur contacts :\nemail : MICB_team@gmail.com \nphone number : +38-067-348-05-65 \nOur TG chat : @MICBchat \nIf you`ve got any ideas or propositions for our bot please write a review below!)', reply_markup=rmk5)
+    bot.register_next_step_handler(message, view_about_us2)
+
+
+def view_about_us2(message):
+    if message.text == "Write review:":
+        feedback_message(message)
+    if message.text == "Back🔙":
+        back(message)
+
+def feedback_message(message):
+    bot.send_message(message.chat.id, 'Write your review:')
+    bot.register_next_step_handler(message, write_feedback)
+
+def write_feedback(message):
+    global feedback_t
+    feedback_t = message.text
+    feedback_added(message)
+
+def feedback_added(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    save_feedback(feedback_t)
+    bot.send_message(message.chat.id, 'Review have been added successfully!!!', reply_markup=rmk5)
+    bot.register_next_step_handler(message, back)
+
+
+def save_feedback(feedback_t: str):
+    c.execute('INSERT INTO reviews (review_text) VALUES (%s)',
+              (feedback_t,))
+    con.commit()
+
+
+
+
+def user_task1(message):
+    global u_id
+    u_id = message.text
+    check_if_user_exist(u_id)
+    if c.fetchone() == None:
+        bot.send_message(message.chat.id, "There is no user with such id")
+    else:
+        task(message)
+
+def task(message):
+    bot.send_message(message.chat.id, 'Write name of task:')
+    bot.register_next_step_handler(message, user_task)
+
+def user_task(message):
+    global name_of_task
+    name_of_task = message.text
+    bot.send_message(message.chat.id, 'Write description of task:')
+    bot.register_next_step_handler(message, task_description)
+
+def task_description(message):
+    global task_desc
+    task_desc = message.text
+    task_added(message)
+
+def task_added(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    c.execute('SELECT id FROM users WHERE user_id = %s', (u_id,))
+    con.commit()
+    id_user = c.fetchone()
+    save_task(id_user,name_of_task, task_desc)
+    bot.send_message(message.chat.id, 'Task have been saved successfully!!!', reply_markup=rmk5)
+    bot.register_next_step_handler(message, back_admin)
+
+def save_task(user_id: int, task_name: str, task_desc: str):
+    c.execute('INSERT INTO tasks (user_id, task_name,tasks_description) VALUES (%s, %s, %s)',
+              (user_id, task_name, task_desc,))
+    con.commit()
+
+def view_appointment(message):
+    bot.send_message(message.chat.id, 'Write date for which you want to view  an appointment:')
+    bot.register_next_step_handler(message, appointment_view_date)
+
+
+def view_tasks(message):
+    c.execute('''SELECT tasks.id, tasks.task_name, tasks.tasks_description  FROM tasks 
+       INNER JOIN users on tasks.user_id = users.id WHERE users.user_id = %s and tasks.task_status= false''',
+              (message.chat.id,))
+    con.commit()
+    sql = c.fetchall()
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"), types.KeyboardButton("Confirm the task"))
+    if sql == None:
+        bot.send_message(message.chat.id, "No undone tasks for this user by now!")
+    else:
+        bot.send_message(message.chat.id, "Your tasks:", reply_markup=rmk5)
+        id = list()
+        task_name = list()
+        task_description = list()
+        # task_status= list()
+        for row in sql:
+            id.append(row[0])
+            task_name.append(row[1])
+            task_description.append(row[2])
+            # task_status.append(row[3])
+        for i in range(0, len(id)):
+            output_task = 'Task number: %s \nTask name: %s \nDescription: %s' % (
+               id[i], task_name[i], task_description[i])
+            bot.send_message(message.chat.id, output_task)
+        bot.register_next_step_handler(message, confirm)
+    bot.register_next_step_handler(message, back)
+
+def confirm(message):
+    if message.text == "Confirm the task":
+        bot.send_message(message.chat.id, 'Write task number, which you want to confirm as done:')
+        bot.register_next_step_handler(message, confirm_task_id)
+
+def confirm_task_id(message):
+    global task_id
+    task_id = message.text
+    c.execute('SELECT task_name from tasks WHERE id= %s', (task_id,))
+    sql = c.fetchone()
+    con.commit()
+    if(sql!=None):
+        c.execute('UPDATE salary SET completed_tasks = completed_tasks + 1 and bonuces = bonuces + 25 WHERE user_id = (SELECT id from users WHERE user_id = %s )', (message.chat.id,))
+        c.execute('UPDATE tasks SET task_status = true WHERE id = %s', (task_id,))
+        con.commit()
+        bot.send_message(message.chat.id, 'Task is done!')
+        bot.register_next_step_handler(message, back)
+    else:
+        bot.send_message(message.chat.id, 'Invalid task number!Write correct task number')
+        bot.register_next_step_handler(message, confirm_task_id)
+
+
+def appointment_view_date(message):
+    global date
+    date = message.text
+    c.execute('''SELECT event.start_time, event.end_time, event.description, event.link FROM event 
+    INNER JOIN timetable on event.timetable_id = timetable.id
+    INNER JOIN users on timetable.user_id = users.id WHERE timetable.date = %s and users.user_id = %s''',
+              (date, message.chat.id,))
+    con.commit()
+    sql = c.fetchall()
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    bot.send_message(message.chat.id, "Your appointment", reply_markup=rmk5)
+    if sql != None:
+        start_time = list()
+        end_time = list()
+        description = list()
+        link = list()
+        for row in sql:
+            start_time.append(row[0])
+            end_time.append(row[1])
+            description.append(row[2])
+            link.append(row[3])
+        for i in range(0, len(start_time)):
+            output_appointment = 'Start time: %s \nEnd time: %s \nDescription %s \nLink %s' % (
+            start_time[i], end_time[i], description[i], link[i])
+            bot.send_message(message.chat.id, output_appointment)
+    else:
+        bot.send_message(message.chat.id, "Oops!No appointment for this date by now")
+    bot.register_next_step_handler(message, back)
+
+
+def user_appointment(message):
+    global u_id
+    u_id = message.text
+    check_if_user_exist(u_id)
+    if c.fetchone() == None:
+        bot.send_message(message.chat.id, "There is no user with such id")
+    else:
+        appointment(message)
+
+def appointment(message):
+    bot.send_message(message.chat.id, 'Write date for which you want to add an appointment:')
+    bot.register_next_step_handler(message, appointment_date)
+
+
+def appointment_date(message):
+    global date
+    date = message.text
+    bot.send_message(message.chat.id, 'Write start time of appointment:')
+    bot.register_next_step_handler(message, appointment_start_time)
+
+
+def appointment_start_time(message):
+    global start_time
+    start_time = message.text
+    bot.send_message(message.chat.id, 'Write end time of appointment:')
+    bot.register_next_step_handler(message, appointment_end_time)
+
+
+def appointment_end_time(message):
+    global end_time
+    end_time = message.text
+    bot.send_message(message.chat.id, 'Write description to an appointment:')
+    bot.register_next_step_handler(message, appointment_description)
+
+
+def appointment_description(message):
+    global description
+    description = message.text
+    bot.send_message(message.chat.id, 'Write link to an appointment:')
+    bot.register_next_step_handler(message, appointment_link)
+
+
+def appointment_link(message):
+    global link
+    link = message.text
+    appointment_added(message)
+
+
+def appointment_added(message):
+    c.execute(
+        'SELECT timetable.id FROM timetable INNER JOIN users on timetable.user_id = users.id WHERE timetable.date = %s and users.user_id = %s',
+        (date, message.chat.id,))
+    con.commit()
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    id_timetable = c.fetchone()
+    if id_timetable == None:
+        c.execute('SELECT id FROM users WHERE user_id = %s', (message.chat.id,))
+        con.commit()
+        id_user = c.fetchone()
+        c.execute('INSERT INTO timetable (user_id, date) VALUES (%s, %s)',
+                  (id_user, date,))
+        con.commit()
+        c.execute(
+            'SELECT timetable.id FROM timetable INNER JOIN users on timetable.user_id = users.id WHERE timetable.date = %s and users.user_id = %s',
+            (date, message.chat.id,))
+        con.commit()
+        id_timetable = c.fetchone()
+        save_appointment(id_timetable, start_time, end_time, description, link)
+        bot.send_message(message.chat.id, "An appointment has been successfully added", reply_markup=rmk5)
+        bot.register_next_step_handler(message, back_admin)
+    else:
+        save_appointment(id_timetable, start_time, end_time, description, link)
+        bot.send_message(message.chat.id, "An appointment has been successfully added", reply_markup=rmk5)
+        bot.register_next_step_handler(message, back_admin)
+
+
+def user_schedule(message):
+    bot.send_message(message.chat.id, 'Write date for which you want to view schedule:')
+    bot.register_next_step_handler(message, date_view)
+
+
+def date_view(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    bot.send_message(message.chat.id, 'Your schedule:', reply_markup=rmk5)
+    global date
+    date = message.text
+    c.execute('SELECT start_hour, end_hour FROM timetable WHERE date = %s', (date,))
+    con.commit()
+    sql = c.fetchone()
+    if sql != None:
+        mylist = list()
+        for row in sql:
+            mylist.append(row)
+        output_schedule = 'Start hour: %s \nEnd hour: %s' % (mylist[0], mylist[1])
+        bot.send_message(message.chat.id, output_schedule)
+    else:
+        bot.send_message(message.chat.id, "Oops!No schedule for this date by now")
+    bot.register_next_step_handler(message, back)
+
+
+def user_info(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    bot.send_message(message.chat.id, 'Your info:', reply_markup=rmk5)
+    c.execute('SELECT users.first_name, users.last_name, users.position_name, salary.salary_amount, salary.completed_tasks, salary.percentage, salary.bonuces FROM users INNER JOIN salary on users.id = salary.user_id WHERE users.user_id = %s', (message.from_user.id,))
+    con.commit()
+    sql = c.fetchone()
+    mylist = list()
+    for row in sql:
+        mylist.append(row)
+    output = 'First name👤: %s \nLast name👤: %s \nPosition💻: %s \nSalary💲: %s \nCompleted tasks✅: %s \nPercentage: %s \nBonuces💸: %s' % (mylist[0], mylist[1], mylist[2], mylist[3], mylist[4],mylist[5], mylist[6])
+    bot.send_message(message.chat.id, output)
+    bot.register_next_step_handler(message, back)
+
+
+def back(message):
+    if message.text == "Back🔙":
+        user(message)
+
+
+def back_admin(message):
+    if message.text == "Back🔙":
+        admin(message)
+
+
+def admin(message):
+    rmk = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk.add(types.KeyboardButton("Add user"), types.KeyboardButton("Delete user"), types.KeyboardButton("Update user"),
+            types.KeyboardButton("Add user timetable"), types.KeyboardButton("Add an user appointment to schedule"),
+            types.KeyboardButton("Add task"),
+            types.KeyboardButton("Back🔙"))
+
+    c.execute("SELECT user_id FROM users WHERE position_name = 'Admin'")
+    sql_query = c.fetchone()[0]
+    if message.from_user.id == sql_query:
+        bot.send_message(message.chat.id, 'Choose what command you want to do:', reply_markup=rmk)
+        bot.register_next_step_handler(message, user_choice2)
+    else:
+        bot.send_message(message.chat.id, 'Sorry, you dont have access to do this operation!')
+
+
+def user_choice2(message):
+    if message.text == "Add user":
+        bot.send_message(message.chat.id, 'Write user telegram id:')
+        bot.register_next_step_handler(message, first_name)
+    if message.text == "Delete user":
+        bot.send_message(message.chat.id, 'Write user telegram id, which you want to delete:')
+        bot.register_next_step_handler(message, delete_user)
+    if message.text == "Update user":
+        bot.send_message(message.chat.id, 'Write user telegram id, which you want to update:')
+        bot.register_next_step_handler(message, update_user)
+    if message.text == "Add user timetable":
+        bot.send_message(message.chat.id, 'Write user telegram id, to add timetable:')
+        bot.register_next_step_handler(message, add_timetable_user)
+    if message.text == "Add an user appointment to schedule":
+        bot.send_message(message.chat.id, 'Write user telegram id, to add an appointment:')
+        bot.register_next_step_handler(message, user_appointment)
+    if message.text == "Add task":
+        bot.send_message(message.chat.id, 'Write user telegram id, to add a task:')
+        bot.register_next_step_handler(message, user_task1)
+    if message.text == "Back🔙":
+        rmk4 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+        rmk4.add(types.KeyboardButton("Admin"), types.KeyboardButton("User"))
+        bot.send_message(message.chat.id, 'Back🔙', reply_markup=rmk4)
+        bot.register_next_step_handler(message, user_choice1)
+    # else:
+    #     error_input(message)
+
+
+def timetable(message):
+    bot.send_message(message.chat.id, 'Write full date to which you want to set schedule:')
+    bot.register_next_step_handler(message, date)
+
+
+def date(message):
+    global u_date
+    u_date = message.text
+    bot.send_message(message.chat.id, 'Write the start time of user work:')
+    bot.register_next_step_handler(message, startTime)
+
+
+def startTime(message):
+    global u_startTime
+    u_startTime = message.text
+    bot.send_message(message.chat.id, 'Write the end time of user work:')
+    bot.register_next_step_handler(message, endTime)
+
+
+def endTime(message):
+    global u_endTime
+    u_endTime = message.text
+    timetable_added(message)
+
+
+def timetable_added(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    c.execute('SELECT id FROM users WHERE user_id = %s', (u_id,))
+    con.commit()
+    id_user = c.fetchone()
+    save_timetable(id_user, u_date, u_startTime, u_endTime)
+    bot.send_message(message.chat.id, 'Schedule have been saved successfully!!!', reply_markup=rmk5)
+    bot.register_next_step_handler(message, back_admin)
+
+
+def add_timetable_user(message):
+    global u_id
+    u_id = message.text
+    check_if_user_exist(u_id)
+    if c.fetchone() == None:
+        bot.send_message(message.chat.id, "There is no user with such id")
+    else:
+        timetable(message)
+
+
+def first_name(message):
+    global id
+    id = message.text
+    bot.send_message(message.chat.id, 'Write user first name:')
+    bot.register_next_step_handler(message, last_name)
+
+
+def last_name(message):
+    global first_name
+    first_name = message.text
+    bot.send_message(message.chat.id, 'Write user last name:')
+    bot.register_next_step_handler(message, username)
+
+
+def username(message):
+    global last_name
+    last_name = message.text
+    bot.send_message(message.chat.id, 'Write username:')
+    bot.register_next_step_handler(message, position)
+
+
+def position(message):
+    global username
+    username = message.text
+    bot.send_message(message.chat.id, 'Write user position:')
+    bot.register_next_step_handler(message, post)
+
+def post(message):
+    global position_name
+    position_name = message.text
+    bot.send_message(message.chat.id, 'Write user post:')
+    bot.register_next_step_handler(message, success)
+
+
+def success(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    global post
+    post = message.text
+    save_info(id, first_name, last_name, username, position_name, post)
+    bot.send_message(message.chat.id, 'User have been saved successfully!!!', reply_markup=rmk5)
+    bot.register_next_step_handler(message, back_admin)
+
+
+def check_if_user_exist(u_id: int):
+    c.execute('SELECT * FROM users WHERE user_id = %s', (u_id,))
+    con.commit()
+
+
+def delete(u_id: int):
+    c.execute('DELETE FROM users WHERE user_id = %s', (u_id,))
+    con.commit()
+
+
+def delete_user(message):
+    global u_id
+    u_id = message.text
+    check_if_user_exist(u_id)
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    if c.fetchone() == None:
+        bot.send_message(message.chat.id, "There is no user with such id", reply_markup=rmk5)
+        bot.register_next_step_handler(message, back_admin)
+    else:
+        delete(u_id)
+        bot.send_message(message.chat.id, "User successfully deleted!", reply_markup=rmk5)
+        bot.register_next_step_handler(message, back_admin)
+
+
+def update_first_name(u_id: int, new_fs: str):
+    c.execute('UPDATE users SET first_name = %s WHERE user_id = %s', (new_fs, u_id,))
+    con.commit()
+
+
+def new_first_name(message):
+    global new_fs
+    new_fs = message.text
+    update_first_name(u_id, new_fs)
+    user_update(message)
+
+
+def update_last_name(u_id: int, new_ls: str):
+    c.execute('UPDATE users SET last_name = %s WHERE user_id = %s', (new_ls, u_id,))
+    con.commit()
+
+
+def new_last_name(message):
+    global new_ls
+    new_ls = message.text
+    update_last_name(u_id, new_ls)
+    user_update(message)
+
+
+def update_username(u_id: int, new_un: str):
+    c.execute('UPDATE users SET username = %s WHERE user_id = %s', (new_un, u_id,))
+    con.commit()
+
+
+def new_username(message):
+    global new_un
+    new_un = message.text
+    update_username(u_id, new_un)
+    user_update(message)
+
+
+def update_position(u_id: int, new_pos: str):
+    c.execute('UPDATE users SET position_name = %s WHERE user_id = %s', (new_pos, u_id,))
+    con.commit()
+
+
+def new_position(message):
+    global new_pos
+    new_pos = message.text
+    update_position(u_id, new_pos)
+    user_update(message)
+
+
+def user_update(message):
+    rmk5 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+    rmk5.add(types.KeyboardButton("Back🔙"))
+    bot.send_message(message.chat.id, "User successfully updated!", reply_markup=rmk5)
+    bot.register_next_step_handler(message, back_admin)
+
+
+def update(message):
+    if message.text == "First name":
+        bot.send_message(message.chat.id, 'Write new first name:')
+        bot.register_next_step_handler(message, new_first_name)
+
+    if message.text == "Last name":
+        bot.send_message(message.chat.id, 'Write new last name:')
+        bot.register_next_step_handler(message, new_last_name)
+
+    if message.text == "Username":
+        bot.send_message(message.chat.id, 'Write new username:')
+        bot.register_next_step_handler(message, new_username)
+
+    if message.text == "Position":
+        bot.send_message(message.chat.id, 'Write new position:')
+        bot.register_next_step_handler(message, new_position)
+
+
+def update_user(message):
+    global u_id
+    u_id = message.text
+    check_if_user_exist(u_id)
+    if c.fetchone() == None:
+        bot.send_message(message.chat.id, "There is no user with such id")
+    else:
+        rmk1 = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True, one_time_keyboard=True)
+        rmk1.add(types.KeyboardButton("First name"), types.KeyboardButton("Last name"),
+                 types.KeyboardButton("Username"), types.KeyboardButton("Position"))
+        bot.send_message(message.chat.id, "Choose which field you want to update:", reply_markup=rmk1)
+        bot.register_next_step_handler(message, update)
+
+
+bot.polling(none_stop=True)
